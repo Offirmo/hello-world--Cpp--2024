@@ -57,91 +57,74 @@ namespace Tree {
 	struct BinaryTreeNode {
 		P payload{};
 
-		BinaryTreeNode *left{};
-		BinaryTreeNode *right{};
+		BinaryTreeNode<P> *left{};
+		BinaryTreeNode<P> *right{};
 
 		// optional
-		BinaryTreeNode *parent{};
+		BinaryTreeNode<P> *parent{};
 
 		// meta
-		RBTreeColor color{RBTreeColor::red}; // red-black tree
+		RBTreeColor color{RBTreeColor::red}; // red-black tree, all nodes start red
 		int balance_factor{0}; // AVL tree
 	};
 
-	// some algos require a constant pointer to tree
-	// where they can change the root (ex. due to rotation)
+	// some insertion algorithms require a stable pointer to the tree
+	// since they can change the root (ex. due to rotation)
+	// it's also a good place to store the node total order function
 	template<typename P>
 	struct Tree {
 		BinaryTreeNode<P> *root{};
+		std::function<int(const P &a, const P &b)> compare;
 	};
 
 	enum DepthFirstTreeTraversalOrder {
 		pre, in, post
 	};
 
-	template<typename P>
-	void traverse_depth_first(
-		const BinaryTreeNode<P> *node,
-		std::function<void(const BinaryTreeNode<P> *node, int depth)> callback,
-		const DepthFirstTreeTraversalOrder order,
-		int depth = 0 // helper for display, for convenience only
-	) {
-		if (!node)
-			return;
-
-		if (order == pre) callback(node, depth);
-		traverse_depth_first(node->left, callback, order, depth + 1);
-		if (order == in) callback(node, depth);
-		traverse_depth_first(node->right, callback, order, depth + 1);
-		if (order == post) callback(node, depth);
-	}
-
-	/* TODO
-template <typename P>
-void traverse_breadth_first(const BinaryTreeNode<P>* node, std::function<void(const BinaryTreeNode<P>* node, int depth)> callback, const DepthFirstTreeTraversalOrder order, int depth = 0) {
-  if (!node)
-	  return;
-
-  xxx
-}*/
-
-	// TODO not found?
-	template<typename P, typename T = P>
-	P search(const BinaryTreeNode<P> *node, const T target, std::function<int(const T a, const P b)> compare) {
-		const P payload = node->payload;
-		const auto comp = compare(target, payload);
-		if (comp == 0)
-			return payload;
-
-		if (comp < 0)
-			return search(node->left, target, compare);
-
-		return search(node->right, target, compare);
-	}
+	////////////
+	// selectors
 
 	template<typename P>
 	BinaryTreeNode<P>* get_child(BinaryTreeNode<P> &node, BinaryTreeDirection dir) {
-		return (dir == BinaryTreeDirection::right)
-		       ? node.right
-		       : node.left;
+		auto child = (dir == BinaryTreeDirection::right)
+		             ? node.right
+		             : node.left;
+		assert((!child) || child->parent == node);
+		return child;
+	}
+
+	template<typename P>
+	BinaryTreeNode<P>* get_parent(BinaryTreeNode<P> &node) {
+		const auto parent = node.parent;
+		if (parent) {
+			assert(parent->left == &node || parent->right == &node);
+		}
+		return parent;
 	}
 
 	template<typename P>
 	BinaryTreeNode<P>* get_uncle(BinaryTreeNode<P> &node) {
-		const auto parent = node.parent;
+		const auto parent = get_parent(node);
 		if (!parent)
 			return nullptr;
 
-		return (parent->left == node)
-		       ? parent->right
-		       : parent->left;
+		const auto grand_parent = get_parent(*parent);
+		if (!grand_parent)
+			return nullptr;
+
+		return (grand_parent->left == parent)
+		       ? grand_parent->right
+		       : grand_parent->left;
 	}
+
+	////////////
+	// reducers
 
 	// https://en.wikipedia.org/wiki/Tree_rotation
 	template<typename P>
-	void rotate(BinaryTreeNode<P> &node, BinaryTreeDirection dir, Tree<P>* tree = nullptr) {
+	void _rotate(BinaryTreeNode<P> &node, BinaryTreeDirection dir, Tree<P>* tree = nullptr) {
 		auto root = &node;
-		auto grand_parent = root->parent;
+		auto root_parent = get_parent(node);
 
 		BinaryTreeNode<P>* pivot;
 
@@ -161,28 +144,174 @@ void traverse_breadth_first(const BinaryTreeNode<P>* node, std::function<void(co
 		}
 		root->parent = pivot;
 
-		pivot->parent = grand_parent;
-		if (grand_parent) {
-			if (grand_parent->left == root)
-				grand_parent->left = pivot;
+		pivot->parent = root_parent;
+		if (root_parent) {
+			if (root_parent->left == root)
+				root_parent->left = pivot;
 			else
-				grand_parent->right = pivot;
+				root_parent->right = pivot;
 		}
 
 		if (tree && tree->root == root)
 			tree->root = pivot;
 	}
+
+	template<typename P>
+	void _self_balance(Tree<P> &tree, BinaryTreeNode<P> &new_node) {
+		new_node.color = RBTreeColor::red;
+		BinaryTreeNode<P>* parent = get_parent(new_node);
+		if (!parent)
+			return;
+
+		BinaryTreeNode<P>* grand_parent = get_parent(*parent);
+		if (!grand_parent) {
+			if (parent->color != RBTreeColor::black)
+				parent->color = RBTreeColor::black;
+			return;
+		}
+
+		BinaryTreeNode<P>* uncle = get_uncle(new_node);
+
+		// 1. Every new_node is either red or black.
+		// 2. All NULL nodes are considered black.
+		// 3. A red new_node does not have a red child.
+		// 4. Every path from a given new_node to any of its descendant NULL nodes goes through the same number of black nodes.
+		// 5. (Conclusion) If a new_node N has exactly one child, it must be a red child, because if it were black, its NIL descendants would sit at a different black depth than N's NIL child, violating requirement 4.
+		do {
+			if (parent->color == RBTreeColor::black) {
+				// i1
+				// all good
+				return;
+			}
+			// parent is red
+
+			/*if (!grand_parent) {
+				goto i4;
+			}*/
+
+
+		} while(false);
+	}
+
+
+	template<typename P>
+	void insert(
+		Tree<P> &tree,
+		P payload
+	) {
+		// v1
+		// build a binary search tree
+		// ensure strict total order
+		// BUT does not balance
+		// tree quality is dependent on the order of insertion
+		// and can lead to degeneracy
+		auto node = new BinaryTreeNode<P>{.payload=payload};
+
+		if (!tree.root) {
+			tree.root = node;
+			return;
+		}
+
+		BinaryTreeNode<P>* parent = tree.root;
+		do {
+			const auto comp = tree.compare(parent->payload, payload);
+			assert(comp != 0);
+
+			if (comp < 0) {
+				if (!parent->right) {
+					parent->right = node;
+				}
+				else {
+					parent = parent->right;
+				}
+			} else {
+				if (!parent->left) {
+					parent->left = node;
+				}
+				else {
+					parent = parent->left;
+				}
+			}
+		} while(parent->right != node && parent->left != node);
+		node->parent = parent;
+
+		// maintenance
+		_self_balance(tree, *node);
+	}
+
+
+	////////////
+	// advanced
+
+	template<typename P>
+	void _traverse_depth_first(
+		const BinaryTreeNode<P> *node,
+		std::function<void(const BinaryTreeNode<P> *node, int depth)> callback,
+		const DepthFirstTreeTraversalOrder order,
+		int depth = 0 // helper for display, for convenience only
+	) {
+		if (!node)
+			return;
+
+		if (order == pre) callback(node, depth);
+		traverse_depth_first(node->left, callback, order, depth + 1);
+		if (order == in) callback(node, depth);
+		traverse_depth_first(node->right, callback, order, depth + 1);
+		if (order == post) callback(node, depth);
+	}
+
+	template<typename P>
+	void traverse_depth_first(
+		Tree<P> &tree,
+		std::function<void(const BinaryTreeNode<P> *node, int depth)> callback,
+		const DepthFirstTreeTraversalOrder order
+	) {
+		_traverse_depth_first(tree.root, callback, order, 0);
+	}
+
+	/* TODO
+template <typename P>
+void traverse_breadth_first(const BinaryTreeNode<P>* node, std::function<void(const BinaryTreeNode<P>* node, int depth)> callback, const DepthFirstTreeTraversalOrder order, int depth = 0) {
+  if (!node)
+	  return;
+
+  xxx
+}*/
+
+
+
+	// TODO not found?
+	template<typename P, typename T = P>
+	P _search(const BinaryTreeNode<P> *node, const T target, std::function<int(const T a, const P b)> compare) {
+		const P payload = node->payload;
+		const auto comp = compare(target, payload);
+		if (comp == 0)
+			return payload;
+
+		if (comp < 0)
+			return _search(node->left, target, compare);
+
+		return _search(node->right, target, compare);
+	}
+
+	template<typename P, typename T = P>
+	P search(const Tree<P> &tree, const T target, std::function<int(const T a, const P b)> compare) {
+		return _search(tree.root, target, compare);
+	}
+
 /*
 	template<typename P>
 	void RBinsert(Tree<P> &tree, BinaryTreeNode<P> *parent, BinaryTreeNode<P> *node, BinaryTreeDirection dir) {
-		BinaryTreeNode<P> *grand_parent{};
-		BinaryTreeNode<P> *uncle{};
-
-		node->parent = parent;
 		if (!parent) {
 			tree.root = node;
 			return;
 		}
+
+		// search insertion place
+		node->parent = parent;
+
+		BinaryTreeNode<P> *grand_parent = get_parent(parent);
+		BinaryTreeNode<P> *uncle = get_uncle(node);
 
 		if (dir == BinaryTreeDirection::right) {
 			parent->right = node;
@@ -220,8 +349,8 @@ void traverse_breadth_first(const BinaryTreeNode<P>* node, std::function<void(co
 		}
 
 		return parent;
-	}
-*/
+	}*/
+
 }
 
 /////////////////////////////////////////////////
@@ -258,11 +387,7 @@ std::string node_to_string(const NodeRuler *node, bool recursive = false, int de
 void print_tree(const NodeRuler *node) {
 	std::cout << node_to_string(node, true) << std::endl;
 }
-
-void print_node(const NodeRuler *node, int depth = 0) {
-	std::cout << node_to_string(node, false, depth) << std::endl;
-}
-
+/*
 NodeRuler *add_ruler(NodeRuler *node, const Ruler::Ruler &ruler) {
 	// v1
 	// build a binary search tree
@@ -287,11 +412,10 @@ NodeRuler *add_ruler(NodeRuler *node, const Ruler::Ruler &ruler) {
 }
 
 
-/*
-NodeRuler* add_ruler(NodeRuler* parent, const Ruler::Ruler &ruler) {
+NodeRuler* add_ruler_2(NodeRuler* parent, const Ruler::Ruler &ruler) {
 	// red-black
 
-	const auto new_node = new NodeRuler{.payload{&ruler},.parent{parent},.is_red{true}};
+	const auto new_node = new NodeRuler{.payload{&ruler},.parent{parent},.color{Tree::RBTreeColor::red}};
 
 	if (!parent)
 		return new_node;
@@ -332,45 +456,50 @@ int main() {
 	//print_ruler(CHARLES_II);
 
 
-	NodeRuler *root_node = nullptr;
+	Tree::Tree<NodeRulerPayload> tree{
+		.compare=[](const NodeRulerPayload &a, const NodeRulerPayload &b) -> int {
+			return Ruler::compare(*a, *b);
+		}
+	};
+
 	if (true) {
 		// insert in reign order = degenerate root_node (if not self-balancing)
-		root_node = add_ruler(root_node, CLOVIS_I);
-		root_node = add_ruler(root_node, VARIOUS_FRANKS);
-		root_node = add_ruler(root_node, CHARLES_II);
-		root_node = add_ruler(root_node, LOUIS_II);
-		root_node = add_ruler(root_node, CARLOMAN_II);
-		root_node = add_ruler(root_node, CHARLES_IIIa);
-		root_node = add_ruler(root_node, ODO);
-		root_node = add_ruler(root_node, CHARLES_IIIb);
-		root_node = add_ruler(root_node, ROBERT_I);
-		root_node = add_ruler(root_node, RUDOLPH);
+		Tree::insert(tree, &CLOVIS_I);
+		Tree::insert(tree, &VARIOUS_FRANKS);
+		Tree::insert(tree, &CHARLES_II);
+		Tree::insert(tree, &LOUIS_II);
+		Tree::insert(tree, &CARLOMAN_II);
+		Tree::insert(tree, &CHARLES_IIIa);
+		Tree::insert(tree, &ODO);
+		Tree::insert(tree, &CHARLES_IIIb);
+		Tree::insert(tree, &ROBERT_I);
+		Tree::insert(tree, &RUDOLPH);
 	} else {
 		// insert in alphabetical order, not reign order
-		root_node = add_ruler(root_node, CARLOMAN_II);
-		root_node = add_ruler(root_node, CHARLES_II);
-		root_node = add_ruler(root_node, CHARLES_IIIa);
-		root_node = add_ruler(root_node, CHARLES_IIIb);
-		root_node = add_ruler(root_node, CLOVIS_I);
-		root_node = add_ruler(root_node, LOUIS_II);
-		root_node = add_ruler(root_node, ODO);
-		root_node = add_ruler(root_node, ROBERT_I);
-		root_node = add_ruler(root_node, RUDOLPH);
-		root_node = add_ruler(root_node, VARIOUS_FRANKS);
+		Tree::insert(tree, &CARLOMAN_II);
+		Tree::insert(tree, &CHARLES_II);
+		Tree::insert(tree, &CHARLES_IIIa);
+		Tree::insert(tree, &CHARLES_IIIb);
+		Tree::insert(tree, &CLOVIS_I);
+		Tree::insert(tree, &LOUIS_II);
+		Tree::insert(tree, &ODO);
+		Tree::insert(tree, &ROBERT_I);
+		Tree::insert(tree, &RUDOLPH);
+		Tree::insert(tree, &VARIOUS_FRANKS);
 	}
 
-	print_tree(root_node);
+	print_tree(tree.root);
 
 	const auto year = 921;
-	const auto ruler = search<NodeRulerPayload, int>(root_node, year, [](auto year, auto ruler) -> int {
+	const auto ruler = search<NodeRulerPayload, int>(tree, year, [](auto year, auto ruler) -> int {
 		return compare_year(year, *ruler);
 	});
 	std::cout << "SEARCH: for year=" << year << " found ruler: " << Ruler::to_string(*ruler) << std::endl;
 
-	Tree::Tree<NodeRulerPayload> tree{.root=root_node};
+	/*
 	Tree::rotate<NodeRulerPayload>(*tree.root, Tree::BinaryTreeDirection::left, &tree);
 	Tree::rotate<NodeRulerPayload>(*tree.root, Tree::BinaryTreeDirection::left, &tree);
-	print_tree(tree.root);
+	print_tree(tree.root);*/
 
 	/*std::cout << "pre" << std::endl;
 	traverse_depth_first<NodeRulerPayload>(root_node, [](const NodeRuler *node, int depth) { print_node(*node); }, pre);
